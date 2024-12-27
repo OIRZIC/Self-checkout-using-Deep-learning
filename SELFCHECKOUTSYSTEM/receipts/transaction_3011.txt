@@ -1,0 +1,8 @@
+STATIONARY SHOP
+Bill exported at 2024-11-17 23:05:47.689291
+Transaction ID: 3011
+--------------------------------------------------
+SO_TAY_A6  :		1 	30000.0
+
+total price:						30000.0
+Bill saved :				../receipts\transaction_3011.txt

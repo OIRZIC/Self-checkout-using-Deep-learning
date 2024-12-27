@@ -1,0 +1,8 @@
+STATIONARY SHOP
+Bill exported at 2024-11-17 21:06:06.247000
+Transaction ID: 259
+--------------------------------------------------
+XOA_KEO_CAPYBARA_9566  :		1 	40000.0
+
+total price:						40000.0
+Bill saved :				../receipts\transaction_259.txt

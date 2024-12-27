@@ -1,0 +1,188 @@
+class BYTETrackerArgs:
+    def __init__(self, track_thresh, track_buffer, mot20, match_thresh, \
+                aspect_ratio_thresh, min_box_area):
+        self.track_thresh        = track_thresh
+        self.track_buffer        = track_buffer
+        self.mot20               = mot20
+        self.match_thresh        = match_thresh
+        self.aspect_ratio_thresh = aspect_ratio_thresh
+        self.min_box_area        = min_box_area
+
+
+def countVehicles(video_path, output_file_name, vertical, roi_xxyy=(0,0,0,0)):
+
+    assert type(video_path)       == str, "video_path argument should be string"
+    assert type(output_file_name) == str, "output_file_name argument should be string"
+    assert type(vertical)         == bool, "vertical argument should be boolean"
+
+    args = BYTETrackerArgs(track_thresh = 0.25,
+                           track_buffer = 30,
+                           mot20 = False,
+                           match_thresh = 0.8,
+                           aspect_ratio_thresh = 3.0,
+                           min_box_area = 1.0)
+
+    obj_tracker = BYTETracker(args)
+
+    checkpoint_path = r'deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7'
+
+    vid     = cv2.VideoCapture(video_path)
+    counter = 0
+    fps = vid.get(cv2.CAP_PROP_FPS)
+    writer= cv2.VideoWriter(str(output_file_name), cv2.VideoWriter_fourcc(*'DIVX'), fps, (1067,600))
+
+    ids                  = []
+    already_tested_ids   = []
+    too_close_tracks_ids = []
+
+    maximum_n = 0 # to keep track of maximum height of counted vehicles in each row, so we can go to next row
+                  # when we reached end of the frame
+    while True:
+        ret, frame    = vid.read()
+
+        if ret:
+            frame         = cv2.resize(frame, (1067,600)) # maintaining 16:9 ratio
+            height, width = frame.shape[:2]
+
+            # if cars are moving horizontally and user wants to use the default ROI parameters
+            if (not vertical) and roi_xxyy == (0,0,0,0):
+                x_starting_point = round(width/5)
+                x_ending_point   = round(4*width/5)
+                y_starting_point = round(height/2) + 50
+                y_ending_point   = round(height/2) + 250
+
+            # if cars are moving vertically and user wants to use the default ROI parameters
+            elif (vertical) and roi_xxyy == (0,0,0,0):
+                x_starting_point = 0                #round(width/3)
+                x_ending_point   = round(3*width/4)
+                y_starting_point = round(height/2)
+                y_ending_point   = height           #round(height/2) + 100
+
+            # if user wants to use the his own ROI parameters
+            else:
+                a, b, c, d = roi_xxyy
+                assert type(a) == int, "roi_xxyy argument should be a list or tuple of integers"
+                assert type(b) == int, "roi_xxyy argument should be a list or tuple of integers"
+                assert type(c) == int, "roi_xxyy argument should be a list or tuple of integers"
+                assert type(d) == int, "roi_xxyy argument should be a list or tuple of integers"
+
+                x_starting_point = a
+                x_ending_point   = b
+                y_starting_point = c
+                y_ending_point   = d
+
+
+
+            if not vertical:
+                areaLine1   = x_starting_point + int((x_ending_point - x_starting_point)/2) - 15
+                areaLine2   = x_starting_point + int((x_ending_point - x_starting_point)/2) + 15
+            else:
+                areaLine1   = y_ending_point - 150
+                areaLine2   = y_ending_point - 100
+
+            # apply adaptive histogram equalization (AHE) in order to increase the contrast in our region of interest.
+            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
+
+            R, G, B = cv2.split(frame[y_starting_point:y_ending_point, x_starting_point:x_ending_point]) # we don't need to
+                                                                                                         # apply AHE
+                                                                                                         # to the whole
+                                                                                                         # frame
+
+            cl1 = clahe.apply(R)
+            cl2 = clahe.apply(G)
+            cl3 = clahe.apply(B)
+
+            orig_frame       = frame.copy() # we take a copy of our original frame before loosing it.
+            frame            = cv2.merge((cl1, cl2, cl3))
+            frame_h, frame_w = frame.shape[:2]
+            frame_size       = np.array([frame_h, frame_w])
+            orig_frame[y_starting_point:y_ending_point, x_starting_point:x_ending_point] = frame # we replace the region of
+                                                                                                 # interest with
+                                                                                                 # the enhanced version of
+                                                                                                 # it.
+
+            res    = model.predict(frame) # we do the prediction only on the ROI. and not the whole frame.
+    #         res    = model.predict(frame)
+            xyxys  = []
+            confss = []
+            oids   = []
+
+            for result in res:
+                for box, r in zip(result.boxes, result.boxes.data):
+                    x, y, w, h = box.xywh[0]
+                    # we add x_starting_point and y_starting_point to x and y coordinate because we shrinked the frame earlier
+                    x1, y1, x2, y2 = int(x) + x_starting_point - int(w/2), int(y) + y_starting_point - int(h/2),\
+                                    int(x) + x_starting_point + int(w/2), int(y) + y_starting_point + int(h/2)
+
+                    # if class of the detected object is not vehicle then discard it
+                    if r[-1] > 0 and r[-1] < 8:
+                        xyxys.append([x1, y1, x2, y2, r[-2]]) # xyxy and score
+                    confss.append(r[-2])
+                    oids.append(r[-1]) # class of the detected object
+
+
+            if len(xyxys) > 0:
+                tracks = obj_tracker.update(np.array(xyxys), frame_size, frame_size)
+            else:
+                tracks = np.array([])
+            if not vertical:
+                # areaLine1
+                cv2.line(orig_frame, (areaLine1, y_starting_point), (areaLine1,y_ending_point), (0,0,255), 2)
+                # areaLine2
+                cv2.line(orig_frame, (areaLine2, y_starting_point), (areaLine2,y_ending_point), (0,0,255), 2)
+            else:
+                # areaLine1
+                cv2.line(orig_frame, (x_starting_point, areaLine1), (x_ending_point,areaLine1), (0,0,255), 2)
+                # areaLine2
+                cv2.line(orig_frame, (x_starting_point, areaLine2), (x_ending_point,areaLine2), (0,0,255), 2)
+
+            for track in tracks:
+
+                cv2.putText(orig_frame, str(track.track_id), (int(track.tlbr[0]), int(track.tlbr[1])),cv2.FONT_HERSHEY_SIMPLEX,0.5, [255, 255, 0], thickness=1, lineType=cv2.LINE_AA)
+                if not vertical:
+                    conditions = ((track.tlbr[0] > areaLine1 and track.tlbr[0]< areaLine2) and # upper left corner of the bbox should be in the area
+                                    track.track_id not in ids and
+                                    track.score > 0.6)
+                else:
+                    conditions = ((track.tlbr[1] > areaLine1 and track.tlbr[1]< areaLine2) and # upper left corner of the bbox should be in the area
+                                    track.track_id not in ids and
+                                    track.score > 0.6)
+
+                if (conditions):
+
+                    cv2.putText(orig_frame, str(track.track_id), (int(track.tlbr[0]), int(track.tlbr[1])),cv2.FONT_HERSHEY_SIMPLEX,0.8, [0, 255, 0], thickness=2, lineType=cv2.LINE_AA)
+                    ids.append(track.track_id)
+
+
+            # Showing the counter on top left side of the frame
+            counter = len(ids)
+            cv2.putText(orig_frame, "Count: " + str(counter), (50,50), fontFace = cv2.FONT_HERSHEY_SIMPLEX, fontScale = 1, color=(255, 0, 0))
+
+            n = 20   # starting row for displaying the counted vehicle image in the original frame
+            m = 250  # starting column for displaying the counted vehicle image in the original frame
+            for track in tracks:
+                if (track.track_id in ids):
+                    cv2.rectangle(orig_frame, (int(track.tlbr[0]),int(track.tlbr[1])), (int(track.tlbr[2]),int(track.tlbr[3])), (0,255,0), 2)
+                    cv2.rectangle(orig_frame, (m, n), (m+int(track.tlwh[2]), n+int(track.tlwh[3])), (0,255,0), 2)
+                    try:
+                        orig_frame[n:n+int(track.tlwh[3]), m:m+int(track.tlwh[2])] = \
+                            orig_frame[int(track.tlwh[1]):int(track.tlwh[1])+int(track.tlwh[3]), int(track.tlwh[0]):int(track.tlwh[0])+int(track.tlwh[2])]
+                        m += int(track.tlwh[2])+5
+                    except:
+                        print("Error!")
+
+            # drawing our RoI (Region of Interest)
+            cv2.rectangle(orig_frame, (x_starting_point, y_starting_point), (x_ending_point,y_ending_point), (255,255,0), 1)
+
+            writer.write(orig_frame)
+            cv2.imshow('frame', orig_frame)
+
+            # press esc for quitting the video
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+        else:
+            break
+
+    vid.release()
+    writer.release()
+    cv2.destroyAllWindows()

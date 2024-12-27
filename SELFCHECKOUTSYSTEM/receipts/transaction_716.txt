@@ -1,0 +1,8 @@
+STATIONARY SHOP
+Bill exported at 2024-11-19 17:14:03.767712
+Transaction ID: 717
+--------------------------------------------------
+KEP_BUOM_19MM  :		1 	20000.0
+
+total price:						20000.0
+Bill saved :				../receipts\transaction_716.txt
